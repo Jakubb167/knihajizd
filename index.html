@@ -4,10 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kniha jízd - Profesionální portál</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background: #f8fafc; color: #1e293b; }
+        
+        /* Grab cursor for interactive charts */
+        canvas { cursor: grab !important; }
+        canvas:active { cursor: grabbing !important; }
+        
         .sidebar { position: fixed; left: 0; top: 0; width: 280px; height: 100vh; background: #1e293b; color: white; padding: 30px 0; z-index: 200; overflow-y: auto; }
         .sidebar h2 { padding: 0 25px 30px; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px; }
         .nav-link { display: flex; align-items: center; gap: 12px; padding: 12px 15px; margin: 5px 15px; color: rgba(255,255,255,0.7); text-decoration: none; border-radius: 8px; cursor: pointer; }
@@ -133,6 +140,16 @@
                     <div style="color: #64748b; font-size: 13px;">dokončených tras</div>
                 </div>
                 <div class="stat-card">
+                    <div style="color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; margin-bottom: 10px;">PALIVO</div>
+                    <div class="stat-card-value" id="totalFuel">0 L</div>
+                    <div style="color: #64748b; font-size: 13px;">celkem natankováno</div>
+                </div>
+                <div class="stat-card">
+                    <div style="color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; margin-bottom: 10px;">SPOTŘEBA</div>
+                    <div class="stat-card-value" id="avgConsumption">0 L/100km</div>
+                    <div style="color: #64748b; font-size: 13px;">průměrná spotřeba</div>
+                </div>
+                <div class="stat-card">
                     <div style="color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; margin-bottom: 10px;">PŘEPRAVENO PALET</div>
                     <div class="stat-card-value" id="totalPallets">0</div>
                     <div style="color: #64748b; font-size: 13px;">celkový objem</div>
@@ -156,12 +173,24 @@
             </div>
 
             <div class="chart-container full-width">
-                <h3 class="chart-title">Denní přehled kilometrů</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 class="chart-title" style="margin: 0;">Denní přehled kilometrů</h3>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <span style="font-size: 11px; color: #64748b; background: #fef3c7; padding: 4px 8px; border-radius: 4px;">💡 Nejprve přibliž kolečkem, pak chyť a táhni</span>
+                        <button onclick="charts.dailyKm?.resetZoom()" style="padding: 5px 10px; background: #e2e8f0; border: none; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 600; color: #475569;">🔄 Reset</button>
+                    </div>
+                </div>
                 <canvas id="dailyKmChart"></canvas>
             </div>
 
             <div class="chart-container full-width" style="margin-top: 30px;">
-                <h3 class="chart-title">📈 Vývoj stavu kilometrů vozidel</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 class="chart-title" style="margin: 0;">📈 Vývoj stavu kilometrů vozidel</h3>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <span style="font-size: 11px; color: #64748b; background: #fef3c7; padding: 4px 8px; border-radius: 4px;">💡 Nejprve přibliž kolečkem, pak chyť a táhni</span>
+                        <button onclick="charts.kmState?.resetZoom()" style="padding: 5px 10px; background: #e2e8f0; border: none; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 600; color: #475569;">🔄 Reset</button>
+                    </div>
+                </div>
                 <canvas id="kmStateChart"></canvas>
             </div>
 
@@ -171,8 +200,19 @@
                     <canvas id="palletsTimeChart"></canvas>
                 </div>
                 <div class="chart-container">
+                    <h3 class="chart-title">Tankování v čase</h3>
+                    <canvas id="fuelTimeChart"></canvas>
+                </div>
+            </div>
+
+            <div class="charts-grid">
+                <div class="chart-container">
                     <h3 class="chart-title">Průměrná délka jízdy</h3>
                     <canvas id="avgTripLengthChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 class="chart-title">Spotřeba podle vozidel</h3>
+                    <canvas id="fuelConsumptionChart"></canvas>
                 </div>
             </div>
 
@@ -233,6 +273,8 @@
                             <th>Počáteční km</th>
                             <th>Konečný km</th>
                             <th>Ujeto km</th>
+                            <th>Tankování</th>
+                            <th>Spotřeba</th>
                             <th>Celkem palet</th>
                             <th>Místo</th>
                             <th>Palety</th>
@@ -379,6 +421,31 @@
             'peugeot': '#1f2937'
         };
 
+        // Zoom configuration helper for time-based charts (Chart.js zoom plugin v1.x)
+        function getZoomConfig() {
+            return {
+                pan: {
+                    enabled: true,
+                    mode: 'x',
+                    speed: 20,
+                    threshold: 10,
+                },
+                zoom: {
+                    wheel: {
+                        enabled: true,
+                        speed: 0.1,
+                    },
+                    pinch: {
+                        enabled: true
+                    },
+                    mode: 'x',
+                },
+                limits: {
+                    x: {min: 'original', max: 'original'},
+                }
+            };
+        }
+
         // Initialize
         function initializeDateRange() {
             const today = new Date();
@@ -450,10 +517,14 @@
         function updateDashboard() {
             const totalKm = filteredTripsData.reduce((sum, t) => sum + (t.kmEnd - t.kmStart), 0);
             const totalPallets = filteredTripsData.reduce((sum, t) => sum + t.totalPallets, 0);
+            const totalFuel = filteredTripsData.reduce((sum, t) => sum + (t.palivo || 0), 0);
             const avgKm = filteredTripsData.length > 0 ? (totalKm / filteredTripsData.length).toFixed(1) : 0;
+            const avgConsumption = totalKm > 0 ? ((totalFuel / totalKm) * 100).toFixed(2) : 0;
 
             document.getElementById('totalKm').textContent = totalKm.toLocaleString('cs-CZ') + ' km';
             document.getElementById('totalTrips').textContent = filteredTripsData.length;
+            document.getElementById('totalFuel').textContent = totalFuel.toLocaleString('cs-CZ', {minimumFractionDigits: 1, maximumFractionDigits: 1}) + ' L';
+            document.getElementById('avgConsumption').textContent = avgConsumption + ' L/100km';
             document.getElementById('totalPallets').textContent = totalPallets.toLocaleString('cs-CZ');
             document.getElementById('avgKm').textContent = avgKm + ' km';
 
@@ -462,7 +533,9 @@
             updateDailyKmChart();
             updateKmStateChart();
             updatePalletsTimeChart();
+            updateFuelTimeChart();
             updateAvgTripLengthChart();
+            updateFuelConsumptionChart();
             updateTopDestinationsChartDash();
             updateWeekdayActivityChartDash();
             updateVehicleUtilizationChartDash();
@@ -535,7 +608,8 @@
                                     return context.dataset.label + ': ' + (context.parsed.y ? context.parsed.y.toLocaleString('cs-CZ') + ' km' : 'Bez dat');
                                 }
                             }
-                        }
+                        },
+                        zoom: getZoomConfig()
                     },
                     scales: {
                         y: {
@@ -746,7 +820,13 @@
                         tension: 0.4
                     }]
                 },
-                options: { responsive: true, plugins: { legend: { display: false } } }
+                options: { 
+                    responsive: true, 
+                    plugins: { 
+                        legend: { display: false },
+                        zoom: getZoomConfig()
+                    }
+                }
             });
         }
 
@@ -776,7 +856,13 @@
                         borderRadius: 6
                     }]
                 },
-                options: { responsive: true, plugins: { legend: { display: false } } }
+                options: { 
+                    responsive: true, 
+                    plugins: { 
+                        legend: { display: false },
+                        zoom: getZoomConfig()
+                    }
+                }
             });
         }
 
@@ -808,6 +894,112 @@
             });
         }
 
+        function updateFuelTimeChart() {
+            const ctx = document.getElementById('fuelTimeChart');
+            if (!ctx) return;
+            
+            const dailyFuel = {};
+            filteredTripsData.forEach(trip => {
+                if (trip.palivo && trip.palivo > 0) {
+                    const date = trip.date.split('T')[0];
+                    dailyFuel[date] = (dailyFuel[date] || 0) + trip.palivo;
+                }
+            });
+            
+            const sortedDates = Object.keys(dailyFuel).sort();
+            const labels = sortedDates.map(d => new Date(d).toLocaleDateString('cs-CZ', { day: '2-digit', month: '2-digit' }));
+
+            if (charts.fuelTime) charts.fuelTime.destroy();
+            
+            charts.fuelTime = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Litry',
+                        data: sortedDates.map(d => dailyFuel[d]),
+                        backgroundColor: '#ef4444',
+                        borderRadius: 6
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.parsed.y.toFixed(1) + ' L';
+                                }
+                            }
+                        },
+                        zoom: getZoomConfig()
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + ' L';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateFuelConsumptionChart() {
+            const ctx = document.getElementById('fuelConsumptionChart');
+            if (!ctx) return;
+            
+            const vehicleConsumption = {};
+            Object.keys(vehicleNames).forEach(v => {
+                const vTrips = filteredTripsData.filter(t => t.vehicle === v);
+                const totalKm = vTrips.reduce((sum, t) => sum + (t.kmEnd - t.kmStart), 0);
+                const totalFuel = vTrips.reduce((sum, t) => sum + (t.palivo || 0), 0);
+                vehicleConsumption[v] = totalKm > 0 ? (totalFuel / totalKm) * 100 : 0;
+            });
+
+            if (charts.fuelConsumption) charts.fuelConsumption.destroy();
+            
+            charts.fuelConsumption = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(vehicleConsumption).map(v => vehicleNames[v]),
+                    datasets: [{
+                        label: 'Spotřeba L/100km',
+                        data: Object.values(vehicleConsumption),
+                        backgroundColor: Object.keys(vehicleConsumption).map(v => vehicleColors[v]),
+                        borderRadius: 8
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.parsed.y.toFixed(2) + ' L/100km';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toFixed(1) + ' L/100km';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         // Vehicles Section
         function loadVehiclesSection() {
             const container = document.getElementById('vehicleStats');
@@ -818,7 +1010,9 @@
                 const vehicleTrips = filteredTripsData.filter(t => t.vehicle === vehicleId);
                 const totalKm = vehicleTrips.reduce((sum, t) => sum + (t.kmEnd - t.kmStart), 0);
                 const totalPallets = vehicleTrips.reduce((sum, t) => sum + t.totalPallets, 0);
+                const totalFuel = vehicleTrips.reduce((sum, t) => sum + (t.palivo || 0), 0);
                 const avgKm = vehicleTrips.length > 0 ? (totalKm / vehicleTrips.length).toFixed(1) : 0;
+                const avgConsumption = totalKm > 0 ? ((totalFuel / totalKm) * 100).toFixed(2) : 0;
                 
                 container.innerHTML += `
                     <div class="stat-card" style="margin-bottom: 20px;">
@@ -831,7 +1025,7 @@
                                 <p style="font-size: 13px; color: #64748b;">${vehicleTrips.length} jízd celkem</p>
                             </div>
                         </div>
-                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
                             <div>
                                 <div style="color: #64748b; font-size: 13px; margin-bottom: 5px;">Celkem km</div>
                                 <div style="font-size: 20px; font-weight: 700;">${totalKm.toLocaleString('cs-CZ')}</div>
@@ -845,6 +1039,14 @@
                                 <div style="font-size: 20px; font-weight: 700;">${totalPallets.toLocaleString('cs-CZ')}</div>
                             </div>
                             <div>
+                                <div style="color: #64748b; font-size: 13px; margin-bottom: 5px;">Natankováno</div>
+                                <div style="font-size: 20px; font-weight: 700; color: #ef4444;">${totalFuel.toFixed(1)} L</div>
+                            </div>
+                            <div>
+                                <div style="color: #64748b; font-size: 13px; margin-bottom: 5px;">Spotřeba</div>
+                                <div style="font-size: 20px; font-weight: 700; color: #ef4444;">${avgConsumption} L/100km</div>
+                            </div>
+                            <div>
                                 <div style="color: #64748b; font-size: 13px; margin-bottom: 5px;">Průměr palet/jízda</div>
                                 <div style="font-size: 20px; font-weight: 700;">${vehicleTrips.length > 0 ? (totalPallets / vehicleTrips.length).toFixed(1) : 0}</div>
                             </div>
@@ -856,6 +1058,15 @@
 
         // Calendar Section
         function loadCalendarSection() {
+            selectedCalendarDay = null;
+            // Reset day detail panel to default state
+            document.getElementById('dayDetailContent').innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; color: #94a3b8;">
+                    <div style="font-size: 64px; margin-bottom: 15px; opacity: 0.5;">📅</div>
+                    <p style="font-size: 16px; font-weight: 600; margin-bottom: 5px;">Vyberte den</p>
+                    <p style="font-size: 13px;">Klikněte na datum v kalendáři</p>
+                </div>
+            `;
             renderCalendar();
         }
 
@@ -868,12 +1079,11 @@
             
             const firstDay = new Date(year, month, 1);
             const lastDay = new Date(year, month + 1, 0);
-            const startDay = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
             
             const grid = document.getElementById('calendarGrid');
             grid.innerHTML = '';
             
-            // Day headers
+            // Day headers (Monday to Sunday)
             ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'].forEach(day => {
                 const header = document.createElement('div');
                 header.className = 'calendar-day-header';
@@ -881,18 +1091,36 @@
                 grid.appendChild(header);
             });
             
-            // Empty cells
-            for (let i = 0; i < startDay; i++) {
+            // getDay() returns: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
+            // We display: Monday=col0, Tuesday=col1, Wednesday=col2, Thursday=col3, Friday=col4, Saturday=col5, Sunday=col6
+            const dayOfWeek = firstDay.getDay();
+            let emptyCells;
+            if (dayOfWeek === 0) {
+                emptyCells = 6; // Sunday -> column 6
+            } else {
+                emptyCells = dayOfWeek - 1; // Monday(1)->0, Tuesday(2)->1, Wednesday(3)->2, Thursday(4)->3, Friday(5)->4, Saturday(6)->5
+            }
+            
+            // Add empty cells
+            for (let i = 0; i < emptyCells; i++) {
                 grid.appendChild(document.createElement('div'));
             }
             
-            // Days
+            // Add days
             const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
             for (let day = 1; day <= lastDay.getDate(); day++) {
                 const date = new Date(year, month, day);
-                const dateStr = date.toISOString().split('T')[0];
+                // Use local date string instead of ISO (which converts to UTC)
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                 const dayTrips = allTripsData.filter(t => t.date.startsWith(dateStr));
-                const isToday = date.toDateString() === today.toDateString();
+                
+                // Check if today
+                const today = new Date();
+                const isToday = date.getFullYear() === today.getFullYear() && 
+                               date.getMonth() === today.getMonth() && 
+                               date.getDate() === today.getDate();
                 const isSelected = selectedCalendarDay === dateStr;
                 
                 const dayDiv = document.createElement('div');
@@ -928,6 +1156,15 @@
 
         function changeMonth(delta) {
             currentCalendarDate.setMonth(currentCalendarDate.getMonth() + delta);
+            selectedCalendarDay = null;
+            // Reset day detail panel
+            document.getElementById('dayDetailContent').innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; color: #94a3b8;">
+                    <div style="font-size: 64px; margin-bottom: 15px; opacity: 0.5;">📅</div>
+                    <p style="font-size: 16px; font-weight: 600; margin-bottom: 5px;">Vyberte den</p>
+                    <p style="font-size: 13px;">Klikněte na datum v kalendáři</p>
+                </div>
+            `;
             renderCalendar();
         }
 
@@ -973,12 +1210,17 @@
             
             trips.forEach(trip => {
                 const km = trip.kmEnd - trip.kmStart;
-                const route = trip.locations.map(l => {
-                    let text = l.place;
-                    if (l.time) text += ` (${l.time})`;
-                    if (l.pallets) text += ` • ${l.pallets} palet`;
-                    return text;
-                }).join('<br>→ ');
+                
+                // Build route HTML with proper formatting
+                let routeHtml = '<div style="font-size: 13px; line-height: 1.8;">';
+                trip.locations.forEach((loc, idx) => {
+                    const arrow = idx === 0 ? '' : '→ ';
+                    let locationText = `${arrow}<strong>${loc.place}</strong>`;
+                    if (loc.time) locationText += ` <span style="color: #94a3b8;">(${loc.time})</span>`;
+                    if (loc.pallets) locationText += ` <span style="color: #f59e0b;">• ${loc.pallets} palet</span>`;
+                    routeHtml += `<div style="margin: 4px 0;">${locationText}</div>`;
+                });
+                routeHtml += '</div>';
                 
                 html += `
                     <div class="trip-card" style="border-left-color: ${vehicleColors[trip.vehicle]}">
@@ -991,7 +1233,7 @@
                             <strong style="color: #2563eb;">(${km.toLocaleString('cs-CZ')} km)</strong>
                         </div>
                         ${trip.totalPallets > 0 ? `<div style="font-size: 13px; color: #f59e0b; margin-bottom: 8px; font-weight: 600;">📦 ${trip.totalPallets} palet celkem</div>` : ''}
-                        <div class="trip-route">${route}</div>
+                        ${routeHtml}
                         ${trip.notes ? `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; font-style: italic;">💬 ${trip.notes}</div>` : ''}
                     </div>
                 `;
@@ -1009,6 +1251,8 @@
             filteredTripsData.forEach(trip => {
                 const date = new Date(trip.date).toLocaleDateString('cs-CZ');
                 const km = trip.kmEnd - trip.kmStart;
+                const fuel = trip.palivo || 0;
+                const consumption = km > 0 && fuel > 0 ? ((fuel / km) * 100).toFixed(2) : '-';
                 
                 // Main row
                 const mainRow = document.createElement('tr');
@@ -1023,6 +1267,12 @@
                     <td rowspan="${trip.locations.length + 1}"><strong>${trip.kmStart.toLocaleString('cs-CZ')}</strong></td>
                     <td rowspan="${trip.locations.length + 1}"><strong>${trip.kmEnd.toLocaleString('cs-CZ')}</strong></td>
                     <td rowspan="${trip.locations.length + 1}"><strong>${km} km</strong></td>
+                    <td rowspan="${trip.locations.length + 1}">
+                        ${fuel > 0 ? `<span style="background: #fee2e2; color: #991b1b; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">⛽ ${fuel.toFixed(1)} L</span>` : '-'}
+                    </td>
+                    <td rowspan="${trip.locations.length + 1}">
+                        ${consumption !== '-' ? `<strong>${consumption} L/100km</strong>` : '-'}
+                    </td>
                     <td rowspan="${trip.locations.length + 1}"><strong>${trip.totalPallets || '-'}</strong></td>
                     <td colspan="2" style="background: #f8fafc; font-weight: 600;">Místa:</td>
                 `;
@@ -1091,32 +1341,53 @@
             const startDate = new Date(year, 0, 1);
             const endDate = new Date(year, 11, 31);
             
-            // Calculate km per day
+            // Calculate km per day and vehicle data
             const dailyKm = {};
+            const dailyVehicles = {};
             allTripsData.forEach(trip => {
                 const tripYear = new Date(trip.date).getFullYear();
                 if (tripYear === parseInt(year)) {
                     const dateStr = trip.date.split('T')[0];
                     dailyKm[dateStr] = (dailyKm[dateStr] || 0) + (trip.kmEnd - trip.kmStart);
+                    
+                    if (!dailyVehicles[dateStr]) {
+                        dailyVehicles[dateStr] = {};
+                    }
+                    const vehicleKey = trip.vehicle;
+                    dailyVehicles[dateStr][vehicleKey] = (dailyVehicles[dateStr][vehicleKey] || 0) + (trip.kmEnd - trip.kmStart);
                 }
             });
 
             const maxKm = Math.max(...Object.values(dailyKm), 1);
             
+            // Build weeks array
             const weeks = [];
             let currentWeek = [];
+            
+            // Start from first day of year
             let currentDate = new Date(startDate);
             
+            // Calculate how many empty cells before first day
+            // getDay(): 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
+            // We want: Monday=col0, Tuesday=col1, Wednesday=col2, Thursday=col3, Friday=col4, Saturday=col5, Sunday=col6
             const firstDayOfWeek = startDate.getDay();
-            const daysToAdd = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
-            for (let i = 0; i < daysToAdd; i++) {
+            let emptyCells;
+            if (firstDayOfWeek === 0) {
+                emptyCells = 6; // Sunday -> column 6
+            } else {
+                emptyCells = firstDayOfWeek - 1; // Monday(1)->0, Tuesday(2)->1, etc
+            }
+            
+            // Add empty cells to first week
+            for (let i = 0; i < emptyCells; i++) {
                 currentWeek.push(null);
             }
 
+            // Add all days
             while (currentDate <= endDate) {
                 currentWeek.push(new Date(currentDate));
                 
-                if (currentWeek.length === 7 || currentDate.getTime() === endDate.getTime()) {
+                if (currentWeek.length === 7) {
                     weeks.push([...currentWeek]);
                     currentWeek = [];
                 }
@@ -1124,6 +1395,7 @@
                 currentDate.setDate(currentDate.getDate() + 1);
             }
 
+            // Pad last week if needed
             while (currentWeek.length > 0 && currentWeek.length < 7) {
                 currentWeek.push(null);
             }
@@ -1186,7 +1458,8 @@
                     dayDiv.className = 'heatmap-day';
 
                     if (day) {
-                        const dateStr = day.toISOString().split('T')[0];
+                        // Use local date string instead of ISO (which converts to UTC)
+                        const dateStr = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
                         const km = dailyKm[dateStr] || 0;
                         
                         let level = 0;
@@ -1209,17 +1482,50 @@
                         dayDiv.addEventListener('mouseenter', function(e) {
                             const tooltip = document.createElement('div');
                             tooltip.className = 'heatmap-tooltip';
+                            
                             const tripCount = allTripsData.filter(t => t.date.startsWith(dateStr)).length;
-                            tooltip.innerHTML = `
-                                <div><strong>${day.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric' })}</strong></div>
-                                <div>${km.toLocaleString('cs-CZ')} km${km > 0 ? ' • ' + tripCount + ' jízd' : ''}</div>
-                            `;
+                            let tooltipContent = `<div><strong>${day.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric' })}</strong></div>`;
+                            
+                            if (km > 0) {
+                                tooltipContent += `<div style="margin: 5px 0; padding-top: 5px; border-top: 1px solid rgba(255,255,255,0.2);">${km.toLocaleString('cs-CZ')} km celkem • ${tripCount} jízd</div>`;
+                                
+                                if (dailyVehicles[dateStr]) {
+                                    tooltipContent += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);">';
+                                    Object.keys(dailyVehicles[dateStr]).forEach(vKey => {
+                                        const vKm = dailyVehicles[dateStr][vKey];
+                                        tooltipContent += `
+                                            <div style="display: flex; align-items: center; gap: 8px; margin: 4px 0;">
+                                                <div style="width: 8px; height: 8px; border-radius: 50%; background: ${vehicleColors[vKey]}"></div>
+                                                <span style="flex: 1;">${vehicleNames[vKey]}</span>
+                                                <strong>${vKm.toLocaleString('cs-CZ')} km</strong>
+                                            </div>
+                                        `;
+                                    });
+                                    tooltipContent += '</div>';
+                                }
+                            } else {
+                                tooltipContent += '<div>0 km</div>';
+                            }
+                            
+                            tooltip.innerHTML = tooltipContent;
                             document.body.appendChild(tooltip);
                             
                             const rect = dayDiv.getBoundingClientRect();
                             tooltip.style.position = 'fixed';
                             tooltip.style.left = rect.left + (rect.width / 2) - (tooltip.offsetWidth / 2) + 'px';
                             tooltip.style.top = rect.top - tooltip.offsetHeight - 10 + 'px';
+                            
+                            // Make sure tooltip stays on screen
+                            const tooltipRect = tooltip.getBoundingClientRect();
+                            if (tooltipRect.left < 10) {
+                                tooltip.style.left = '10px';
+                            }
+                            if (tooltipRect.right > window.innerWidth - 10) {
+                                tooltip.style.left = (window.innerWidth - tooltipRect.width - 10) + 'px';
+                            }
+                            if (tooltipRect.top < 10) {
+                                tooltip.style.top = rect.bottom + 10 + 'px';
+                            }
                             
                             dayDiv._tooltip = tooltip;
                         });
